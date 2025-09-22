@@ -1,0 +1,23 @@
+# 가상환경
+.venv/
+venv/
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 빌드/배포 산출물
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE/에디터
+.vscode/
+.idea/
+*.swp
+
+# 로그/데이터
+*.log
+*.sqlite3
