@@ -1,6 +1,8 @@
-import olefile, struct
+import olefile
+import struct
+import os
 
-doc_path = "./테스트.doc"
+doc_path = "./rogod.doc"
 with olefile.OleFileIO(doc_path) as ole:
     # WordDocument 스트림 읽기
     word_data = ole.openstream("WordDocument").read()
@@ -16,6 +18,9 @@ with olefile.OleFileIO(doc_path) as ole:
 
     # Table 스트림 읽기
     table_data = ole.openstream(tbl_stream).read()
+
+    #파일 쓰기 부분 정의
+    write_ole = olefile.OleFileIO(doc_path, write_mode=True)
 
 print("WordDocument 스트림 크기:", len(word_data))
 print(f"fcClx = {hex(fcClx)} ({fcClx})")
@@ -111,26 +116,57 @@ print("조각 개수:", len(pieces))
 for p in pieces[:5]:
     print(p)
 
-'''
+
 def decode_piece(chunk: bytes, fCompressed: bool) -> str:
     if fCompressed:
-        return chunk.decode("cp1252", errors="replace") #1 byte
+        text = chunk.decode("cp1252", errors="replace") #1 byte
     else:
-        return chunk.decode("utf-16le", errors="replace")  #2 byte
+        text = chunk.decode("utf-16le", errors="replace")  #2 byte
+    # Normalize newlines so CR (\r) doesn't overwrite prints in console
+    # Word often uses CRLF; sometimes lone CR can appear in pieces
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
 
 #텍스트 추출
 def extract_full_text(word_data: bytes, pieces):
     texts = []
-    for p in pieces:
+    for i, p in enumerate(pieces):
         #WordDocument에서 해당 조각의 바이트 범위 잘라오기
-        chunk = word_data[p["fc"]: p["fc"] + p["byte_count"]]
+        start_pos = p["fc"]
+        end_pos = p["fc"] + p["byte_count"]
+        
+        print(f"조각 {i}: fc={p['fc']}, byte_count={p['byte_count']}, fCompressed={p['fCompressed']}")
+        print(f" 범위: {start_pos} ~ {end_pos} (WordDocument 크기: {len(word_data)})")
+        
+        if end_pos > len(word_data):
+            print(f"경고: 조각이 WordDocument 범위를 벗어남!")
+            continue
+            
+        chunk = word_data[start_pos:end_pos]
+        print(f"추출된 바이트: {len(chunk)} bytes")
+        print(f"바이트 내용 (hex): {chunk[:20].hex()}...")
+        
         text = decode_piece(chunk, p["fCompressed"])
+        # Escape control characters for debug visibility
+        debug_text = text.encode('unicode_escape').decode('ascii')
+        print(f"디코딩된 텍스트: '{debug_text}'")
+        print()
+        
         texts.append(text)
     return "".join(texts)
 
 full_text = extract_full_text(word_data, pieces)
-print("추출된 텍스트: ", full_text)
+# For final output, show visible newlines
+visible_text = full_text
+print("==== 추출된 텍스트 ====")
+print(visible_text)
 
-replacement_text = full_text.replace("함근희", "***")
-print("치환된 텍스트:", replacement_text)
-'''
+# Replacement on normalized text
+replacement_text = visible_text.replace("함근희", "***")
+print("==== 치환된 텍스트 ====")
+print(replacement_text)
+
+#수정된 스트림을 저장
+write_ole.write_stream("WordDocument", bytes(word_data))
+ole.close()
+print("종료됨")
