@@ -2,7 +2,7 @@ import olefile
 import struct
 import os
 
-doc_path = "./rogod.doc"
+doc_path = "./이름 테스트.doc"
 with olefile.OleFileIO(doc_path) as ole:
     # WordDocument 스트림 읽기
     word_data = ole.openstream("WordDocument").read()
@@ -80,17 +80,17 @@ def parse_plcpcd(plcpcd: bytes):
     pieces = []
     for k in range(n):
         pcd_bytes = plcpcd[pcd_off + 8*k : pcd_off + 8*(k+1)] #PCD = 8byte
-        flags = struct.unpack_from("<h", pcd_bytes, 0)[0] #앞 2바이트는 flag
+        flags = struct.unpack_from("<H", pcd_bytes, 0)[0] #앞 2바이트는 flag
 
         #이후 4바이트 = fc
-        fc_raw = struct.unpack_from("<i", pcd_bytes, 2)[0]
+        fc_raw = struct.unpack_from("<I", pcd_bytes, 2)[0]
 
         # fcRaw 해석
         fc = fc_raw & 0x3FFFFFFF  # 하위 30비트만
         fCompressed = (fc_raw & 0x40000000) != 0
         print(f"fc_raw=0x{fc_raw:08X}, fc={fc}, fCompressed={fCompressed}")
         
-        prm = struct.unpack_from("<h", pcd_bytes, 0)[0]
+        prm    = struct.unpack_from("<H", pcd_bytes, 6)[0]
 
         cp_start = acp[k]
         cp_end   = acp[k+1]
@@ -161,12 +161,66 @@ visible_text = full_text
 print("==== 추출된 텍스트 ====")
 print(visible_text)
 
-# Replacement on normalized text
-replacement_text = visible_text.replace("함근희", "***")
-print("==== 치환된 텍스트 ====")
-print(replacement_text)
+# 추출 텍스트 내 특정 문자열을 동일 길이의 '*'로 치환 후, WordDocument 스트림에 반영하여 저장
+target_text = "함근희"
+replacement_text = "*" * len(target_text)
 
-#수정된 스트림을 저장
-write_ole.write_stream("WordDocument", bytes(word_data))
-ole.close()
-print("종료됨")
+# 원본 WordDocument 바이트를 수정 가능한 bytearray로 변환
+modified_word_data = bytearray(word_data)
+
+total_replacements = 0
+for p in pieces:
+    # 각 조각에서 텍스트 디코딩
+    start_pos = p["fc"]
+    end_pos = p["fc"] + p["byte_count"]
+    if end_pos > len(word_data):
+        continue
+
+    chunk = word_data[start_pos:end_pos]
+    text = decode_piece(chunk, p["fCompressed"])
+
+    # 해당 조각 내에서 target_text의 모든 발생 위치를 찾음
+    search_start = 0
+    while True:
+        idx = text.find(target_text, search_start)
+        if idx == -1:
+            break
+
+        # 조각 내 문자 인덱스를 바이트 오프셋으로 변환
+        bytes_per_char = 1 if p["fCompressed"] else 2
+        byte_start = start_pos + idx * bytes_per_char
+        byte_len = len(target_text) * bytes_per_char
+
+        # 조각의 인코딩에 맞춰 대체 바이트 생성
+        enc = "cp1252" if p["fCompressed"] else "utf-16le"
+        replacement_bytes = replacement_text.encode(enc, errors="replace")
+
+        # 길이 안전 확인(동일 길이 교체)
+        if len(replacement_bytes) != byte_len:
+            # 자원 정리 후 오류 발생시켜 종료
+            try:
+                write_ole.close()
+            finally:
+                pass
+            raise ValueError(
+                f"치환 바이트 길이 불일치: expected={byte_len}, got={len(replacement_bytes)}, encoding={enc}"
+            )
+
+        # 바이트 배열 내 직접 치환
+        modified_word_data[byte_start:byte_start + byte_len] = replacement_bytes
+        total_replacements += 1
+
+        # 다음 검색 시작 위치 갱신
+        search_start = idx + len(target_text)
+
+print(f"치환 대상 '{target_text}' 총 {total_replacements}건 치환 완료")
+
+# 변경된 WordDocument 스트림을 파일에 기록
+if total_replacements > 0:
+    write_ole.write_stream("WordDocument", bytes(modified_word_data))
+    write_ole.close()
+    print("WordDocument 스트림에 변경사항 저장 완료")
+else:
+    # 변경이 없으면 열린 핸들을 정리만
+    write_ole.close()
+    print("치환할 내용이 없어 저장하지 않았습니다")
